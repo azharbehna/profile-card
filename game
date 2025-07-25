@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Runner Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for the game */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c; /* Dark background */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars */
+            color: #e2e8f0; /* Light text color */
+        }
+
+        .game-container {
+            background-color: #2d3748; /* Slightly lighter dark for container */
+            border: 4px solid #4a5568; /* Border around the game area */
+            border-radius: 15px;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.5);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            max-width: 90vw; /* Max width relative to viewport */
+            box-sizing: border-box; /* Include padding in width */
+        }
+
+        canvas {
+            background-color: #4a5568; /* Game background */
+            display: block;
+            border-radius: 8px;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.3);
+            width: 100%; /* Make canvas responsive */
+            max-width: 600px; /* Max width for larger screens */
+            height: auto; /* Maintain aspect ratio */
+            aspect-ratio: 3 / 2; /* Define a preferred aspect ratio (width / height) */
+        }
+
+        .game-info {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            max-width: 600px;
+            font-size: 1.25rem; /* text-xl */
+            font-weight: bold;
+            color: #a0aec0; /* Lighter gray for info */
+        }
+
+        .game-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 20px 40px;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 2rem;
+            font-weight: bold;
+            display: none; /* Hidden by default */
+            z-index: 10;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.7);
+        }
+
+        .game-message button {
+            margin-top: 20px;
+        }
+
+        .control-buttons {
+            display: flex;
+            gap: 10px;
+            width: 100%;
+            justify-content: center;
+        }
+
+        .control-buttons button {
+            background-color: #6366f1; /* Indigo */
+            color: white;
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.2s ease, box-shadow 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            flex-grow: 1; /* Allow buttons to grow */
+            max-width: 180px; /* Max width for buttons */
+        }
+
+        .control-buttons button:hover {
+            background-color: #4f46e5; /* Darker indigo */
+            transform: translateY(-2px);
+            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.4);
+        }
+
+        .control-buttons button:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="game-info">
+            <div id="scoreDisplay">Score: 0</div>
+            <div id="highScoreDisplay">High Score: 0</div>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+        <div class="control-buttons">
+            <button id="startButton">Start Game</button>
+            <button id="restartButton" style="display: none;">Restart Game</button>
+        </div>
+    </div>
+
+    <div id="gameMessage" class="game-message">
+        <p id="messageText"></p>
+        <button id="messageButton" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg shadow-md">
+            Start
+        </button>
+    </div>
+
+    <script>
+        // Get canvas and context
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Game state variables
+        let gameRunning = false;
+        let score = 0;
+        let highScore = localStorage.getItem('runnerHighScore') || 0; // Load high score from local storage
+        let animationFrameId; // To store the requestAnimationFrame ID
+
+        // Player properties
+        const player = {
+            width: 40,
+            height: 40,
+            x: 0, // Initial position, updated on resize
+            y: 0,   // Initial position, updated on resize
+            dx: 0, // Player horizontal movement speed
+            speed: 5
+        };
+
+        // Obstacle properties
+        const obstacles = [];
+        const obstacleWidth = 30;
+        const obstacleHeight = 30;
+        const obstacleSpeed = 3;
+        const obstacleSpawnRate = 100; // Lower value means more frequent obstacles
+        let frameCount = 0;
+
+        // UI Elements
+        const scoreDisplay = document.getElementById('scoreDisplay');
+        const highScoreDisplay = document.getElementById('highScoreDisplay');
+        const startButton = document.getElementById('startButton');
+        const restartButton = document.getElementById('restartButton');
+        const gameMessage = document.getElementById('gameMessage');
+        const messageText = document.getElementById('messageText');
+        const messageButton = document.getElementById('messageButton');
+
+        /**
+         * Updates the high score display.
+         */
+        function updateHighScoreDisplay() {
+            highScoreDisplay.textContent = `High Score: ${highScore}`;
+        }
+
+        /**
+         * Sets up initial canvas dimensions and player position.
+         * This is called on initial load and window resize.
+         */
+        function setupCanvasAndPlayer() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+            player.x = canvas.width / 2 - player.width / 2;
+            player.y = canvas.height - player.height - 20; // 20px from bottom
+        }
+
+        /**
+         * Initializes game variables to their starting state.
+         * This is called for a new game or a restart.
+         */
+        function resetGameState() {
+            score = 0;
+            obstacles.length = 0; // Clear obstacles
+            player.dx = 0;
+            frameCount = 0;
+            scoreDisplay.textContent = `Score: ${score}`;
+            updateHighScoreDisplay();
+            setupCanvasAndPlayer(); // Ensure player position is correct after reset/resize
+        }
+
+        /**
+         * Draws the player on the canvas.
+         */
+        function drawPlayer() {
+            ctx.fillStyle = '#6366f1'; // Indigo color for player
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+        }
+
+        /**
+         * Draws all obstacles on the canvas.
+         */
+        function drawObstacles() {
+            ctx.fillStyle = '#ef4444'; // Red color for obstacles
+            obstacles.forEach(obstacle => {
+                ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+            });
+        }
+
+        /**
+         * Updates player position based on dx.
+         */
+        function updatePlayer() {
+            player.x += player.dx;
+
+            // Keep player within canvas bounds
+            if (player.x < 0) {
+                player.x = 0;
+            }
+            if (player.x + player.width > canvas.width) {
+                player.x = canvas.width - player.width;
+            }
+        }
+
+        /**
+         * Updates obstacle positions and removes off-screen obstacles.
+         * Handles obstacle spawning.
+         */
+        function updateObstacles() {
+            // Move obstacles down
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                obstacles[i].y += obstacleSpeed;
+
+                // Remove obstacles that are off-screen
+                if (obstacles[i].y > canvas.height) {
+                    obstacles.splice(i, 1);
+                    score++; // Increment score for each avoided obstacle
+                }
+            }
+
+            // Spawn new obstacles
+            frameCount++;
+            if (frameCount % obstacleSpawnRate === 0) {
+                // Random x position for the new obstacle
+                const randomX = Math.random() * (canvas.width - obstacleWidth);
+                obstacles.push({
+                    x: randomX,
+                    y: -obstacleHeight, // Start above the canvas
+                    width: obstacleWidth,
+                    height: obstacleHeight
+                });
+            }
+        }
+
+        /**
+         * Checks for collisions between the player and obstacles.
+         * @returns {boolean} True if a collision occurred, false otherwise.
+         */
+        function checkCollision() {
+            for (const obstacle of obstacles) {
+                if (
+                    player.x < obstacle.x + obstacle.width &&
+                    player.x + player.width > obstacle.x &&
+                    player.y < obstacle.y + obstacle.height &&
+                    player.y + player.height > obstacle.y
+                ) {
+                    return true; // Collision detected
+                }
+            }
+            return false;
+        }
+
+        /**
+         * Displays a message box to the user.
+         * @param {string} text - The message to display.
+         * @param {string} buttonText - The text for the button.
+         * @param {function} [callback] - Optional callback function for the button.
+         */
+        function showMessage(text, buttonText, callback) {
+            messageText.textContent = text;
+            messageButton.textContent = buttonText;
+            gameMessage.style.display = 'block';
+
+            // Remove previous event listener to prevent multiple bindings
+            messageButton.onclick = null;
+            messageButton.onclick = () => {
+                gameMessage.style.display = 'none';
+                if (callback) {
+                    callback();
+                }
+            };
+        }
+
+        /**
+         * Hides the message box.
+         */
+        function hideMessage() {
+            gameMessage.style.display = 'none';
+        }
+
+        /**
+         * Main game loop. Updates game state and redraws elements.
+         */
+        function gameLoop() {
+            if (!gameRunning) {
+                return; // Stop the loop if game is not running
+            }
+
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Update game elements
+            updatePlayer();
+            updateObstacles();
+
+            // Draw game elements
+            drawPlayer();
+            drawObstacles();
+
+            // Check for collision
+            if (checkCollision()) {
+                endGame();
+                return; // Stop the loop immediately after ending the game
+            }
+
+            // Request next frame
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        /**
+         * Starts the game.
+         */
+        function startGame() {
+            if (gameRunning) return; // Prevent starting multiple times
+            hideMessage();
+            gameRunning = true;
+            startButton.style.display = 'none'; // Hide start button
+            restartButton.style.display = 'block'; // Show restart button
+            gameLoop();
+        }
+
+        /**
+         * Ends the game, updates high score, and displays game over message.
+         */
+        function endGame() {
+            gameRunning = false;
+            cancelAnimationFrame(animationFrameId); // Stop the animation loop
+
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('runnerHighScore', highScore); // Save high score
+                updateHighScoreDisplay();
+                showMessage(`New High Score! Your Score: ${score}`, "Play Again", restartGame);
+            } else {
+                showMessage(`Game Over! Your Score: ${score}`, "Try Again", restartGame);
+            }
+        }
+
+        /**
+         * Restarts the game.
+         */
+        function restartGame() {
+            resetGameState(); // Reset game state without showing initial message
+            startGame();      // Start the game loop again
+        }
+
+        // Event Listeners for player movement
+        document.addEventListener('keydown', (e) => {
+            if (!gameRunning && e.code === 'Space') {
+                startGame();
+                return;
+            }
+            if (gameRunning) {
+                if (e.key === 'ArrowLeft') {
+                    player.dx = -player.speed;
+                } else if (e.key === 'ArrowRight') {
+                    player.dx = player.speed;
+                }
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                player.dx = 0; // Stop movement when key is released
+            }
+        });
+
+        // Event Listeners for buttons
+        startButton.addEventListener('click', startGame);
+        restartButton.addEventListener('click', restartGame);
+        // The messageButton's click handler is set dynamically by showMessage()
+
+        // Handle canvas resizing
+        window.addEventListener('resize', () => {
+            setupCanvasAndPlayer(); // Adjust canvas and player position
+            if (gameRunning) {
+                // If game was running, no need to restart, just redraw with new dimensions
+                // The gameLoop will continue and adapt
+            } else {
+                // If game was not running (e.g., at start screen or game over),
+                // ensure the message box is correctly positioned and game state is consistent.
+                // Re-show message if it was visible
+                if (gameMessage.style.display === 'block') {
+                    // Re-show with current message details if needed, or just ensure positioning
+                    // For simplicity, we'll just ensure player position is updated.
+                }
+            }
+        });
+
+        // Initialize the game when the window loads
+        window.onload = function() {
+            setupCanvasAndPlayer(); // Initial setup of canvas and player
+            resetGameState(); // Reset all game variables
+            // Show initial game message after everything is set up
+            showMessage("Press 'Start Game' or Spacebar to Play!", "Start", startGame);
+        };
+    </script>
+</body>
+</html>
